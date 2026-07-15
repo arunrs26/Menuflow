@@ -1,13 +1,48 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Globe, Settings, Terminal, ShieldAlert } from 'lucide-react';
+import { Sparkles, Globe, Settings, Terminal, ShieldAlert, Lock } from 'lucide-react';
 import { MenuItem, Order, Reservation, Offer, RestaurantSettings } from './types';
 import CustomerSite from './components/CustomerSite';
 import AdminTerminal from './components/AdminTerminal';
 
+// Import Firebase config & helpers
+import { db, auth, OperationType, handleFirestoreError } from './firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
+
+// Default seed structures matching original db.json
+const defaultSettings: RestaurantSettings = {
+  restaurantName: "My Restaurant",
+  tagline: "Your Restaurant tagline here.",
+  logoUrl: "",
+  themeColor: "orange",
+  businessHours: "Mon - Sun: 11:00 AM - 11:00 PM",
+  whatsappNumber: "",
+  email: "contact@myrestaurant.com",
+  location: "Enter Restaurant Address Here",
+  googleMapUrl: "",
+  socialLinks: {
+    instagram: "",
+    facebook: ""
+  },
+  bannerImage: ""
+};
+
+const defaultMenu: MenuItem[] = [];
+
+const defaultOffers: Offer[] = [];
+
+const defaultOrders: Order[] = [];
+
+const defaultReservations: Reservation[] = [];
+
 export default function App() {
-  const [userRole, setUserRole] = useState<'customer' | 'admin'>('admin');
+  const [userRole, setUserRole] = useState<'customer' | 'admin'>('customer');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Firebase Auth State
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
   // App Database State
   const [menu, setMenu] = useState<MenuItem[]>([]);
@@ -16,83 +51,198 @@ export default function App() {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
 
-  // Fetch all data from backend
-  const fetchDbState = async () => {
+  // Synchronize base metadata, config and public records in real-time
+  useEffect(() => {
+    // 1. Unsubscribe handler for Auth state change
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+
+    // 2. Real-time subscription to global restaurant settings
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'restaurant'), (snapshot) => {
+      if (snapshot.exists()) {
+        setSettings(snapshot.data() as RestaurantSettings);
+        setLoading(false);
+        setError('');
+      } else {
+        console.log("No restaurant settings found in Firestore, using default local settings.");
+        setSettings(defaultSettings);
+        setLoading(false);
+        setError('');
+      }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, 'settings/restaurant');
+    });
+
+    // 3. Real-time menu updates
+    const unsubscribeMenu = onSnapshot(collection(db, 'menu'), (snapshot) => {
+      const items: MenuItem[] = [];
+      snapshot.forEach((doc) => {
+        items.push(doc.data() as MenuItem);
+      });
+      setMenu(items.length > 0 ? items : defaultMenu);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'menu');
+    });
+
+    // 4. Real-time offer coupons
+    const unsubscribeOffers = onSnapshot(collection(db, 'offers'), (snapshot) => {
+      const items: Offer[] = [];
+      snapshot.forEach((doc) => {
+        items.push(doc.data() as Offer);
+      });
+      setOffers(items.length > 0 ? items : defaultOffers);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'offers');
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeSettings();
+      unsubscribeMenu();
+      unsubscribeOffers();
+    };
+  }, []);
+
+  // Sync protected collections (orders & reservations) in real-time strictly if signed-in as verified admin
+  useEffect(() => {
+    let unsubscribeOrders = () => {};
+    let unsubscribeReservations = () => {};
+
+    const isUserAdmin = currentUser && currentUser.email === "arunbunnychitti111@gmail.com" && currentUser.emailVerified === true;
+
+    if (isUserAdmin) {
+      unsubscribeOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
+        const items: Order[] = [];
+        snapshot.forEach((doc) => {
+          items.push(doc.data() as Order);
+        });
+        // Sort newest first
+        items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setOrders(items);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'orders');
+      });
+
+      unsubscribeReservations = onSnapshot(collection(db, 'reservations'), (snapshot) => {
+        const items: Reservation[] = [];
+        snapshot.forEach((doc) => {
+          items.push(doc.data() as Reservation);
+        });
+        // Sort newest first
+        items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setReservations(items);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'reservations');
+      });
+    } else {
+      setOrders([]);
+      setReservations([]);
+    }
+
+    return () => {
+      unsubscribeOrders();
+      unsubscribeReservations();
+    };
+  }, [currentUser]);
+
+  // Seeding helper that only runs when the verified Admin is logged in
+  useEffect(() => {
+    const isUserAdmin = currentUser && currentUser.email === "arunbunnychitti111@gmail.com" && currentUser.emailVerified === true;
+    if (isUserAdmin) {
+      const seedDb = async () => {
+        try {
+          const settingsSnap = await getDoc(doc(db, 'settings', 'restaurant'));
+          if (!settingsSnap.exists()) {
+            console.log("[Admin Autoseed] No restaurant settings in Firestore. Seeding defaults...");
+            await setDoc(doc(db, 'settings', 'restaurant'), defaultSettings);
+            
+            // Seed Menu
+            for (const item of defaultMenu) {
+              await setDoc(doc(db, 'menu', item.id), item);
+            }
+            // Seed Offers
+            for (const offer of defaultOffers) {
+              await setDoc(doc(db, 'offers', offer.code), offer);
+            }
+            // Seed Orders
+            for (const order of defaultOrders) {
+              await setDoc(doc(db, 'orders', order.id), order);
+            }
+            // Seed Reservations
+            for (const res of defaultReservations) {
+              await setDoc(doc(db, 'reservations', res.id), res);
+            }
+            console.log("[Admin Autoseed] Database seeded successfully in Firestore!");
+          }
+        } catch (err) {
+          console.error("[Admin Autoseed] Seeding failed:", err);
+        }
+      };
+      seedDb();
+    }
+  }, [currentUser]);
+
+  // Auth Handlers
+  const handleSignInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://mail.google.com/');
+    provider.addScope('https://www.googleapis.com/auth/gmail.compose');
+    provider.addScope('https://www.googleapis.com/auth/gmail.modify');
+    provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+    provider.addScope('https://www.googleapis.com/auth/gmail.send');
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      const response = await fetch('/api/db');
-      if (!response.ok) throw new Error('Failed to retrieve restaurant records');
-      const data = await response.json();
-      
-      setMenu(data.menu || []);
-      setOrders(data.orders || []);
-      setReservations(data.reservations || []);
-      setOffers(data.offers || []);
-      setSettings(data.settings || null);
-      setError('');
-    } catch (err: any) {
-      console.error(err);
-      setError('Could not connect to the backend server. Make sure Vite server is fully booted.');
-    } finally {
-      setLoading(false);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleAccessToken(credential.accessToken);
+      }
+    } catch (err) {
+      console.error('Google Sign-In failed:', err);
     }
   };
 
-  useEffect(() => {
-    fetchDbState();
-    
-    // Poll the backend periodically to get live updates of orders and reservations
-    const interval = setInterval(fetchDbState, 8000);
-    return () => clearInterval(interval);
-  }, []);
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setGoogleAccessToken(null);
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    }
+  };
 
   // Update settings handler
   const handleUpdateSettings = async (newSettings: Partial<RestaurantSettings>) => {
     try {
-      const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
-      if (response.ok) {
-        const updated = await response.json();
-        setSettings(updated);
-      }
+      const docRef = doc(db, 'settings', 'restaurant');
+      await setDoc(docRef, { ...settings, ...newSettings }, { merge: true });
     } catch (err) {
-      console.error('Failed to update settings:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'settings/restaurant');
     }
   };
 
   // Save / Edit menu item handler
   const handleSaveMenuItem = async (item: MenuItem) => {
     try {
-      const response = await fetch('/api/menu', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      if (response.ok) {
-        await fetchDbState(); // Re-sync state
-      }
+      const id = item.id || Date.now().toString();
+      const itemToSave = { ...item, id };
+      await setDoc(doc(db, 'menu', id), itemToSave);
     } catch (err) {
-      console.error('Failed to save menu item:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'menu');
     }
   };
 
   // Delete menu item handler
   const handleDeleteMenuItem = async (id: string) => {
     try {
-      const response = await fetch(`/api/menu/${id}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        await fetchDbState();
-      }
+      await deleteDoc(doc(db, 'menu', id));
     } catch (err) {
-      console.error('Failed to delete menu item:', err);
+      handleFirestoreError(err, OperationType.DELETE, `menu/${id}`);
     }
   };
 
-  // Place order handler from customer
+  // Place order handler from customer (guests can place)
   const handlePlaceOrder = async (orderData: {
     customerName: string;
     customerPhone: string;
@@ -100,41 +250,40 @@ export default function App() {
     totalAmount: number;
     orderType: 'whatsapp' | 'direct';
     notes: string;
+    tableNumber?: string;
   }) => {
     try {
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
-      });
-      if (response.ok) {
-        const data = await response.json();
-        await fetchDbState();
-        return { success: true, order: data.order };
-      }
+      const id = Math.floor(1000 + Math.random() * 9000).toString();
+      const newOrder: Order = {
+        id,
+        status: 'pending',
+        timestamp: new Date().toISOString(),
+        customerName: orderData.customerName || 'Walk-in Customer',
+        customerPhone: orderData.customerPhone || '',
+        items: orderData.items || [],
+        totalAmount: orderData.totalAmount || 0,
+        orderType: orderData.orderType || 'direct',
+        notes: orderData.notes || '',
+        tableNumber: orderData.tableNumber || undefined
+      };
+      await setDoc(doc(db, 'orders', id), newOrder);
+      return { success: true, order: newOrder };
     } catch (err) {
-      console.error('Failed to place order:', err);
+      handleFirestoreError(err, OperationType.CREATE, 'orders');
+      return { success: false };
     }
-    return { success: false };
   };
 
   // Update order status from admin kanban
   const handleUpdateOrderStatus = async (id: string, status: Order['status']) => {
     try {
-      const response = await fetch(`/api/orders/${id}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      if (response.ok) {
-        await fetchDbState();
-      }
+      await updateDoc(doc(db, 'orders', id), { status });
     } catch (err) {
-      console.error('Failed to update order status:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${id}`);
     }
   };
 
-  // Book table from customer
+  // Book table from customer (guests can book)
   const handleBookTable = async (resData: {
     customerName: string;
     customerPhone: string;
@@ -144,50 +293,74 @@ export default function App() {
     notes: string;
   }) => {
     try {
-      const response = await fetch('/api/reservations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resData)
-      });
-      if (response.ok) {
-        await fetchDbState();
-        return true;
-      }
+      const id = 'res-' + Date.now().toString();
+      const newRes: Reservation = {
+        id,
+        customerName: resData.customerName,
+        customerPhone: resData.customerPhone,
+        date: resData.date,
+        time: resData.time,
+        guests: Number(resData.guests) || 2,
+        status: 'pending',
+        notes: resData.notes || '',
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'reservations', id), newRes);
+      return true;
     } catch (err) {
-      console.error('Failed to book table:', err);
+      handleFirestoreError(err, OperationType.CREATE, 'reservations');
+      return false;
     }
-    return false;
   };
 
   // Update reservation status from admin panel
   const handleUpdateReservationStatus = async (id: string, status: Reservation['status']) => {
     try {
-      const response = await fetch(`/api/reservations/${id}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      if (response.ok) {
-        await fetchDbState();
-      }
+      await updateDoc(doc(db, 'reservations', id), { status });
     } catch (err) {
-      console.error('Failed to update reservation status:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `reservations/${id}`);
     }
   };
 
   // Save / Toggle offer coupons
   const handleSaveOffer = async (offer: Offer) => {
     try {
-      const response = await fetch('/api/offers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(offer)
+      const code = offer.code.toUpperCase();
+      await setDoc(doc(db, 'offers', code), {
+        code,
+        discountPercent: Number(offer.discountPercent),
+        description: offer.description,
+        isActive: offer.isActive
       });
-      if (response.ok) {
-        await fetchDbState();
-      }
     } catch (err) {
-      console.error('Failed to save offer coupon:', err);
+      handleFirestoreError(err, OperationType.WRITE, `offers/${offer.code}`);
+    }
+  };
+
+  // Wipe all database data (clear existing mock/sample data)
+  const handleWipeDatabase = async () => {
+    try {
+      // 1. Delete menu items from Firestore
+      for (const item of menu) {
+        await deleteDoc(doc(db, 'menu', item.id));
+      }
+      // 2. Delete offers from Firestore
+      for (const offer of offers) {
+        await deleteDoc(doc(db, 'offers', offer.code));
+      }
+      // 3. Delete orders from Firestore
+      for (const order of orders) {
+        await deleteDoc(doc(db, 'orders', order.id));
+      }
+      // 4. Delete reservations from Firestore
+      for (const res of reservations) {
+        await deleteDoc(doc(db, 'reservations', res.id));
+      }
+      // 5. Reset settings in Firestore to the clean defaultSettings
+      await setDoc(doc(db, 'settings', 'restaurant'), defaultSettings);
+      console.log("Database successfully reset!");
+    } catch (err) {
+      console.error("Failed to wipe database:", err);
     }
   };
 
@@ -198,7 +371,7 @@ export default function App() {
           <Sparkles size={40} />
         </div>
         <h4 className="font-serif text-lg font-bold">Initializing MenuFlow Engine</h4>
-        <p className="text-neutral-500 text-xs mt-1.5 max-w-sm">Please wait while the full-stack database system mounts assets and configures local services.</p>
+        <p className="text-neutral-500 text-xs mt-1.5 max-w-sm">Please wait while the full-stack database system mounts cloud assets and configures secure Firestore listeners.</p>
       </div>
     );
   }
@@ -208,16 +381,18 @@ export default function App() {
       <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6 text-center">
         <ShieldAlert size={48} className="text-red-500 mb-4" />
         <h4 className="font-serif text-lg font-bold">Mounting Failures Occurred</h4>
-        <p className="text-neutral-400 text-xs mt-2 max-w-md">{error || 'Unable to connect to the backend server.'}</p>
+        <p className="text-neutral-400 text-xs mt-2 max-w-md">{error || 'Unable to connect to the cloud server.'}</p>
         <button 
-          onClick={fetchDbState}
-          className="mt-6 px-5 py-2.5 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-semibold"
+          onClick={() => window.location.reload()}
+          className="mt-6 px-5 py-2.5 bg-amber-700 hover:bg-amber-800 text-white rounded-none text-xs font-bold uppercase tracking-widest"
         >
-          Retry Connection
+          Reload Interface
         </button>
       </div>
     );
   }
+
+  const isUserAdmin = currentUser && currentUser.email === "arunbunnychitti111@gmail.com" && currentUser.emailVerified === true;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -261,20 +436,68 @@ export default function App() {
             onBookTable={handleBookTable}
           />
         ) : (
-          <AdminTerminal 
-            settings={settings}
-            menu={menu}
-            orders={orders}
-            reservations={reservations}
-            offers={offers}
-            onUpdateSettings={handleUpdateSettings}
-            onSaveMenuItem={handleSaveMenuItem}
-            onDeleteMenuItem={handleDeleteMenuItem}
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-            onUpdateReservationStatus={handleUpdateReservationStatus}
-            onSaveOffer={handleSaveOffer}
-            onSwitchToCustomer={() => setUserRole('customer')}
-          />
+          /* Secure Auth Wall for Admin Terminal */
+          !isUserAdmin ? (
+            <div className="min-h-[85vh] bg-neutral-50 flex items-center justify-center p-6">
+              <div className="w-full max-w-md bg-white border-2 border-neutral-950 p-8 shadow-none text-center">
+                <div className="w-16 h-16 bg-neutral-950 text-white flex items-center justify-center mx-auto mb-6">
+                  <Lock size={32} />
+                </div>
+                <h2 className="text-2xl font-black uppercase tracking-tighter text-neutral-950 mb-2">Secure Admin Terminal</h2>
+                <p className="text-neutral-500 text-xs leading-relaxed max-w-xs mx-auto mb-6 font-medium">
+                  This panel is secured by Zero-Trust Firestore Security rules. Please authenticate with your registered Google Administrator account to manage live orders and menus.
+                </p>
+
+                {currentUser ? (
+                  // Logged in but not verified email/admin
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 text-left">
+                    <p className="text-red-800 text-xs font-bold uppercase tracking-wider mb-1">Access Denied</p>
+                    <p className="text-red-700 text-xs font-medium leading-relaxed">
+                      Logged in as <strong className="break-all">{currentUser.email}</strong>, which is not verified as the administrator of this project.
+                    </p>
+                    <button
+                      onClick={handleSignOut}
+                      className="mt-3 text-neutral-950 underline text-xs font-bold hover:text-neutral-800 uppercase tracking-wider"
+                    >
+                      Sign Out / Switch Account
+                    </button>
+                  </div>
+                ) : null}
+
+                <button
+                  id="google-signin-btn"
+                  onClick={handleSignInWithGoogle}
+                  className="w-full py-4 bg-neutral-950 hover:bg-neutral-900 active:bg-neutral-950 text-white font-black text-xs uppercase tracking-widest transition flex items-center justify-center gap-3 border-2 border-neutral-950"
+                >
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                    <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.28.61 4.5 1.625l2.437-2.437C17.312 1.696 14.933 1 12.24 1 6.58 1 2 5.58 2 11.24s4.58 10.24 10.24 10.24c5.795 0 10.254-4.074 10.254-10.24 0-.69-.08-1.355-.22-1.955H12.24z"/>
+                  </svg>
+                  Sign In with Google
+                </button>
+              </div>
+            </div>
+          ) : (
+            <AdminTerminal 
+              settings={settings}
+              menu={menu}
+              orders={orders}
+              reservations={reservations}
+              offers={offers}
+              onUpdateSettings={handleUpdateSettings}
+              onSaveMenuItem={handleSaveMenuItem}
+              onDeleteMenuItem={handleDeleteMenuItem}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+              onUpdateReservationStatus={handleUpdateReservationStatus}
+              onSaveOffer={handleSaveOffer}
+              onSwitchToCustomer={() => setUserRole('customer')}
+              currentUser={currentUser}
+              onSignOut={handleSignOut}
+              onWipeDatabase={handleWipeDatabase}
+              googleAccessToken={googleAccessToken}
+              onConnectGmail={handleSignInWithGoogle}
+              onTokenAcquired={setGoogleAccessToken}
+            />
+          )
         )}
       </div>
     </div>

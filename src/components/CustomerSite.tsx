@@ -20,7 +20,10 @@ import {
   Twitter, 
   AlertCircle,
   X,
-  Sparkles
+  Sparkles,
+  QrCode,
+  Camera,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MenuItem, OrderItem, Reservation, Offer, RestaurantSettings } from '../types';
@@ -36,6 +39,7 @@ interface CustomerSiteProps {
     totalAmount: number;
     orderType: 'whatsapp' | 'direct';
     notes: string;
+    tableNumber?: string;
   }) => Promise<{ success: boolean; order?: any }>;
   onBookTable: (resData: {
     customerName: string;
@@ -58,6 +62,26 @@ export default function CustomerSite({
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
+
+  // Table & QR code scanner state
+  const [tableNumber, setTableNumber] = useState<string>('');
+  const [showQrScanner, setShowQrScanner] = useState(false);
+  const [qrMessage, setQrMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Read URL query params on mount to detect table scan
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tableParam = params.get('table');
+    if (tableParam) {
+      setTableNumber(tableParam);
+      setQrMessage({
+        type: 'success',
+        text: `🛎️ Table ${tableParam} assigned successfully from your QR Code scan!`
+      });
+      // Automatically dismiss the success banner after 6 seconds
+      setTimeout(() => setQrMessage(null), 6000);
+    }
+  }, []);
 
   // Shopping Cart State
   const [cart, setCart] = useState<OrderItem[]>([]);
@@ -85,11 +109,7 @@ export default function CustomerSite({
   const [bookingSuccess, setBookingSuccess] = useState(false);
 
   // Reviews State
-  const [reviews, setReviews] = useState([
-    { name: 'Elena R.', rating: 5, text: 'The Truffle Risotto is absolutely divine. Tastes like genuine Northern Italy! Wonderful experience ordering direct.', date: 'Today' },
-    { name: 'Marcus T.', rating: 5, text: 'Wagyu Burger was exceptionally juicy and cooked exactly to medium-rare. Quick WhatsApp checkout process too!', date: 'Yesterday' },
-    { name: 'Simran K.', rating: 4, text: 'The woodfired margherita has the perfect airy crust. Easy table reservations, beautiful restaurant interior.', date: '3 days ago' },
-  ]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [newReviewName, setNewReviewName] = useState('');
   const [newReviewText, setNewReviewText] = useState('');
   const [newReviewRating, setNewReviewRating] = useState(5);
@@ -188,6 +208,114 @@ export default function CustomerSite({
     }
   };
 
+  // QR CODE DECODERS AND HANDLERS
+  const handleQrDecoded = (text: string) => {
+    let table = '';
+    try {
+      if (text.includes('?table=')) {
+        const urlObj = new URL(text);
+        table = urlObj.searchParams.get('table') || '';
+      } else if (text.includes('&table=')) {
+        const searchParams = new URLSearchParams(text.substring(text.indexOf('?')));
+        table = searchParams.get('table') || '';
+      } else {
+        const cleaned = text.replace(/[^0-9a-zA-Z-]/g, '');
+        if (cleaned) table = cleaned;
+      }
+    } catch (e) {
+      const cleaned = text.replace(/[^0-9a-zA-Z-]/g, '');
+      if (cleaned) table = cleaned;
+    }
+
+    if (table) {
+      setTableNumber(table);
+      setShowQrScanner(false);
+      setQrMessage({
+        type: 'success',
+        text: `🛎️ Table ${table} assigned successfully from your scanned QR code!`
+      });
+      // Clear toast after 6 seconds
+      setTimeout(() => setQrMessage(null), 6000);
+    } else {
+      setQrMessage({
+        type: 'error',
+        text: "Could not decode a valid table number from this QR code. Please try again."
+      });
+      setTimeout(() => setQrMessage(null), 4000);
+    }
+  };
+
+  const handleQrImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const { Html5Qrcode } = await import('html5-qrcode');
+      const tempId = 'temp-hidden-scanner';
+      let hiddenEl = document.getElementById(tempId);
+      if (!hiddenEl) {
+        hiddenEl = document.createElement('div');
+        hiddenEl.id = tempId;
+        hiddenEl.style.display = 'none';
+        document.body.appendChild(hiddenEl);
+      }
+      
+      const html5QrCode = new Html5Qrcode(tempId);
+      const decodedText = await html5QrCode.scanFile(file, true);
+      handleQrDecoded(decodedText);
+      
+      // Cleanup
+      html5QrCode.clear();
+      hiddenEl.remove();
+    } catch (err) {
+      console.error("QR Image decode failed:", err);
+      alert("Could not decode any QR Code from this image. Please verify the QR is clean and try again.");
+    }
+  };
+
+  // Live Camera Scanner mounting
+  useEffect(() => {
+    let html5QrCode: any = null;
+    if (showQrScanner) {
+      const timer = setTimeout(async () => {
+        try {
+          const { Html5Qrcode } = await import('html5-qrcode');
+          const element = document.getElementById('qr-camera-stream');
+          if (element) {
+            html5QrCode = new Html5Qrcode('qr-camera-stream');
+            await html5QrCode.start(
+              { facingMode: 'environment' },
+              {
+                fps: 10,
+                qrbox: (width: number, height: number) => {
+                  const size = Math.min(width, height) * 0.7;
+                  return { width: size, height: size };
+                }
+              },
+              (decodedText: string) => {
+                handleQrDecoded(decodedText);
+              },
+              () => {
+                // Silent error (verbose scanning intervals)
+              }
+            );
+          }
+        } catch (err) {
+          console.error("Camera scanner setup failed:", err);
+        }
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCode) {
+          if (html5QrCode.isScanning) {
+            html5QrCode.stop().catch((e: any) => console.error("Failed to stop scanner", e));
+          }
+        }
+      };
+    }
+  }, [showQrScanner]);
+
   const subtotal = cart.reduce((acc, c) => acc + (c.price * c.quantity), 0);
   const discountAmount = activeDiscount ? (subtotal * activeDiscount.discountPercent) / 100 : 0;
   const total = subtotal - discountAmount;
@@ -220,7 +348,8 @@ export default function CustomerSite({
       items: cart,
       totalAmount: total,
       orderType: 'whatsapp' as const,
-      notes: checkoutNotes
+      notes: checkoutNotes,
+      tableNumber: tableNumber || undefined
     };
 
     const res = await onPlaceOrder(orderData);
@@ -231,6 +360,9 @@ export default function CustomerSite({
       let text = `*New Order from ${settings.restaurantName} Website!*\n\n`;
       text += `*Customer:* ${customerName}\n`;
       text += `*Phone:* ${customerPhone}\n`;
+      if (tableNumber) {
+        text += `*Table:* Table ${tableNumber}\n`;
+      }
       text += `*Notes:* ${checkoutNotes || 'None'}\n\n`;
       text += `*Items Ordered:*\n`;
       cart.forEach(item => {
@@ -268,7 +400,8 @@ export default function CustomerSite({
       items: cart,
       totalAmount: total,
       orderType: 'direct' as const,
-      notes: checkoutNotes
+      notes: checkoutNotes,
+      tableNumber: tableNumber || undefined
     };
 
     const res = await onPlaceOrder(orderData);
@@ -360,6 +493,34 @@ export default function CustomerSite({
           </nav>
 
           <div className="flex items-center gap-4">
+            {/* Table QR Badge & Button */}
+            {tableNumber ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs font-bold shadow-xs">
+                <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse"></span>
+                <span>Table {tableNumber}</span>
+                <button
+                  onClick={() => {
+                    setTableNumber('');
+                    setQrMessage({ type: 'success', text: "Table assignment cleared successfully." });
+                    setTimeout(() => setQrMessage(null), 3000);
+                  }}
+                  title="Clear table assignment"
+                  className="ml-1 text-amber-600 hover:text-amber-800 transition-colors cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ) : (
+              <button
+                id="header-scan-qr-btn"
+                onClick={() => setShowQrScanner(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 hover:bg-neutral-50 rounded-lg text-neutral-700 text-xs font-semibold shadow-xs transition"
+              >
+                <QrCode size={14} className="text-amber-700" />
+                <span className="hidden sm:inline">Scan Table</span>
+              </button>
+            )}
+
             <button 
               id="view-cart-btn"
               onClick={() => setCartOpen(true)}
@@ -515,7 +676,7 @@ export default function CustomerSite({
                 {/* Item Image */}
                 <div className="h-56 relative bg-neutral-100 overflow-hidden">
                   <img 
-                    src={item.image} 
+                    src={item.image || undefined} 
                     alt={item.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
                     referrerPolicy="no-referrer"
@@ -562,13 +723,19 @@ export default function CustomerSite({
             ))}
           </AnimatePresence>
 
-          {filteredMenu.length === 0 && (
+          {menu.length === 0 ? (
+            <div className="col-span-full py-16 text-center bg-white border border-neutral-200 p-8">
+              <Utensils className="mx-auto text-neutral-400 mb-4" size={40} />
+              <h5 className="font-semibold text-neutral-800 mb-1">Our Menu is Coming Soon</h5>
+              <p className="text-neutral-500 text-sm max-w-md mx-auto">The restaurant owners are busy creating their customizable culinary masterpieces. Please check back shortly!</p>
+            </div>
+          ) : filteredMenu.length === 0 ? (
             <div className="col-span-full py-16 text-center">
               <AlertCircle className="mx-auto text-neutral-400 mb-4" size={40} />
               <h5 className="font-semibold text-neutral-800 mb-1">No dishes match your search</h5>
               <p className="text-neutral-500 text-sm">Try adjusting your filters or search keywords.</p>
             </div>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -793,22 +960,30 @@ export default function CustomerSite({
             </div>
 
             <div className="space-y-4 max-h-[420px] overflow-y-auto pr-2">
-              {reviews.map((r, idx) => (
-                <div key={idx} className="bg-white rounded-2xl border border-neutral-100 shadow-xs p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h5 className="font-semibold text-neutral-900">{r.name}</h5>
-                      <div className="flex gap-0.5 text-amber-400 mt-0.5">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star key={i} fill={i < r.rating ? 'currentColor' : 'none'} size={14} />
-                        ))}
-                      </div>
-                    </div>
-                    <span className="text-xs text-neutral-400">{r.date}</span>
-                  </div>
-                  <p className="text-neutral-600 text-sm leading-relaxed">{r.text}</p>
+              {reviews.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-neutral-100 p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
+                  <MessageSquare className="text-neutral-300 mb-4" size={36} />
+                  <h5 className="font-semibold text-neutral-800 mb-1">No reviews yet</h5>
+                  <p className="text-neutral-400 text-xs">Be the first to share your dining experience!</p>
                 </div>
-              ))}
+              ) : (
+                reviews.map((r, idx) => (
+                  <div key={idx} className="bg-white rounded-2xl border border-neutral-100 shadow-xs p-5">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h5 className="font-semibold text-neutral-900">{r.name}</h5>
+                        <div className="flex gap-0.5 text-amber-400 mt-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star key={i} fill={i < r.rating ? 'currentColor' : 'none'} size={14} />
+                          ))}
+                        </div>
+                      </div>
+                      <span className="text-xs text-neutral-400">{r.date}</span>
+                    </div>
+                    <p className="text-neutral-600 text-sm leading-relaxed">{r.text}</p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -883,15 +1058,23 @@ export default function CustomerSite({
 
           {/* Map Side */}
           <div className="lg:col-span-7 h-[400px] rounded-3xl overflow-hidden border border-neutral-100 shadow-sm bg-neutral-100">
-            <iframe 
-              src={settings.googleMapUrl} 
-              width="100%" 
-              height="100%" 
-              style={{ border: 0 }} 
-              allowFullScreen={false} 
-              loading="lazy"
-              title="Google Map Location"
-            ></iframe>
+            {settings.googleMapUrl ? (
+              <iframe 
+                src={settings.googleMapUrl} 
+                width="100%" 
+                height="100%" 
+                style={{ border: 0 }} 
+                allowFullScreen={false} 
+                loading="lazy"
+                title="Google Map Location"
+              ></iframe>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-50 text-neutral-400 p-8 text-center">
+                <MapPin size={48} className="mb-2 text-neutral-300" />
+                <p className="text-sm font-semibold">Map Location Not Set</p>
+                <p className="text-xs">Configure the Google Map embed URL in the Admin settings terminal.</p>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -980,6 +1163,43 @@ export default function CustomerSite({
                       <div className="border-t border-neutral-100 pt-6 space-y-4">
                         <h5 className="font-bold text-neutral-900 text-sm">Delivery & Checkout Details</h5>
                         <div className="space-y-3">
+                          {/* Dine-in Table Assignment Indicator */}
+                          <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-100 flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <QrCode className="text-amber-700 shrink-0" size={18} />
+                              <div>
+                                <h6 className="text-[11px] font-bold text-neutral-800 uppercase tracking-wider">Dine-in Assignment</h6>
+                                <p className="text-xs text-neutral-600 mt-0.5">
+                                  {tableNumber ? `Assigned to Table ${tableNumber}` : 'No table assigned yet'}
+                                </p>
+                              </div>
+                            </div>
+                            {tableNumber ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTableNumber('');
+                                  setQrMessage({ type: 'success', text: "Table assignment cleared successfully." });
+                                  setTimeout(() => setQrMessage(null), 3000);
+                                }}
+                                className="text-xs font-bold text-red-600 hover:text-red-700 hover:underline cursor-pointer"
+                              >
+                                Clear
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowQrScanner(true);
+                                  setCartOpen(false); // Close cart to display scanning overlay
+                                }}
+                                className="text-xs font-bold text-amber-700 hover:text-amber-800 hover:underline cursor-pointer"
+                              >
+                                Scan QR
+                              </button>
+                            )}
+                          </div>
+
                           <div>
                             <label className="block text-[10px] font-bold text-neutral-700 uppercase mb-1.5">Your Name</label>
                             <input 
@@ -1135,6 +1355,160 @@ export default function CustomerSite({
               >
                 Continue Browsing
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Real-time QR Status Toast Banner */}
+      <AnimatePresence>
+        {qrMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-24 left-1/2 transform -translate-x-1/2 z-50 bg-neutral-900 border border-neutral-800 text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 text-xs font-semibold max-w-md w-[90%]"
+          >
+            <div className="p-1.5 bg-amber-600 text-white rounded-lg shrink-0">
+              <QrCode size={16} />
+            </div>
+            <div className="flex-1">{qrMessage.text}</div>
+            <button onClick={() => setQrMessage(null)} className="text-neutral-400 hover:text-white cursor-pointer ml-1 p-1 rounded-full hover:bg-neutral-800 transition">
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table QR Code Scanner Modal */}
+      <AnimatePresence>
+        {showQrScanner && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-md" onClick={() => setShowQrScanner(false)} />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-neutral-100 relative z-10 flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="px-6 py-5 border-b border-neutral-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <QrCode className="text-amber-700 animate-pulse" size={20} />
+                  <div>
+                    <h4 className="font-serif font-bold text-neutral-950 text-base">Table QR Scanner</h4>
+                    <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">Patron Digital Check-In</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowQrScanner(false)}
+                  className="p-2 rounded-full hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Selector Tabs & Options */}
+              <div className="bg-neutral-50 p-6 flex-1 overflow-y-auto space-y-6">
+                
+                {/* Method 1: Simulated Quick Selector (Ideal for fast testing in preview / dev) */}
+                <div className="bg-white rounded-2xl border border-neutral-200/60 p-5 shadow-xs space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-amber-50 text-amber-700 rounded-xl shrink-0">
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-neutral-900 text-xs uppercase tracking-wider">Simulate Scan (Demo Mode)</h5>
+                      <p className="text-neutral-500 mt-0.5 text-[11px] leading-relaxed">Instantly pick a table to preview the auto-assigned check-in experience.</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-4 gap-2 pt-1">
+                    {['1', '2', '3', '4', '5', '6', '7', '8'].map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => handleQrDecoded(`${window.location.origin}/?table=${t}`)}
+                        className="py-2.5 px-3 border border-neutral-200 hover:border-neutral-400 rounded-xl font-bold text-sm text-neutral-800 transition shadow-xs hover:scale-[1.03] flex flex-col items-center gap-1 cursor-pointer bg-white"
+                      >
+                        <span className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">T-</span>
+                        <span>{t}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Method 2: Live Camera Stream */}
+                <div className="bg-white rounded-2xl border border-neutral-200/60 p-5 shadow-xs space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-neutral-100 text-neutral-700 rounded-xl shrink-0">
+                      <Camera size={16} />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-neutral-900 text-xs uppercase tracking-wider">Scan with Camera</h5>
+                      <p className="text-neutral-500 mt-0.5 text-[11px] leading-relaxed">Allow camera access to automatically read codes on table placards.</p>
+                    </div>
+                  </div>
+
+                  {/* Camera Stream Frame */}
+                  <div className="relative overflow-hidden rounded-2xl bg-neutral-950 aspect-video flex items-center justify-center border border-neutral-800 shadow-inner">
+                    <div id="qr-camera-stream" className="w-full h-full object-cover relative"></div>
+                    
+                    {/* Floating green scanner guidelines */}
+                    <div className="absolute inset-0 pointer-events-none border-2 border-transparent flex items-center justify-center">
+                      <div className="w-40 h-40 border-2 border-emerald-500/80 rounded-2xl relative flex items-center justify-center">
+                        {/* Red Laser Line */}
+                        <div className="w-[90%] h-0.5 bg-red-500/90 absolute top-1/2 left-[5%] animate-bounce shadow-[0_0_10px_#ef4444]"></div>
+                        {/* Corners styling */}
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-emerald-500"></div>
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-emerald-500"></div>
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-emerald-500"></div>
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-emerald-500"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Method 3: Upload Image File */}
+                <div className="bg-white rounded-2xl border border-neutral-200/60 p-5 shadow-xs space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-neutral-100 text-neutral-700 rounded-xl shrink-0">
+                      <Upload size={16} />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-neutral-900 text-xs uppercase tracking-wider">Upload QR Image</h5>
+                      <p className="text-neutral-500 mt-0.5 text-[11px] leading-relaxed">Upload a clear photograph of a table QR code to assign immediately.</p>
+                    </div>
+                  </div>
+
+                  <div className="border-2 border-dashed border-neutral-200 hover:border-neutral-300 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer relative transition bg-neutral-50 hover:bg-neutral-100">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleQrImageUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <Upload className="text-neutral-400 mb-2" size={24} />
+                    <span className="text-xs font-bold text-neutral-800">Browse QR Placard Image</span>
+                    <span className="text-[10px] text-neutral-400 mt-1">Supports PNG, JPG, or WEBP</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-neutral-100 bg-neutral-50 text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowQrScanner(false)}
+                  className="px-6 py-2 border border-neutral-200 hover:bg-neutral-100 font-semibold text-xs text-neutral-600 rounded-xl transition cursor-pointer"
+                >
+                  Cancel Scanner
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

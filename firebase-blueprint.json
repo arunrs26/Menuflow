@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "A menu item of the restaurant",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "maxLength": 50 },
+        "image": { "type": "string", "maxLength": 500 },
+        "isVeg": { "type": "boolean" },
+        "isAvailable": { "type": "boolean" }
+      },
+      "required": ["id", "name", "price", "description", "category", "isVeg", "isAvailable"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "An order placed by a customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "customerPhone": { "type": "string", "maxLength": 20 },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "ready", "delivered", "cancelled"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "orderType": { "type": "string", "enum": ["whatsapp", "direct"] },
+        "notes": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "customerName", "customerPhone", "items", "totalAmount", "status", "timestamp", "orderType"]
+    },
+    "Reservation": {
+      "title": "Reservation",
+      "description": "A booking request for a table",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "customerPhone": { "type": "string", "maxLength": 20 },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "guests": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerName", "customerPhone", "date", "time", "guests", "status", "createdAt"]
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "A promotional discount code",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 30 },
+        "discountPercent": { "type": "integer" },
+        "description": { "type": "string", "maxLength": 200 },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["code", "discountPercent", "description", "isActive"]
+    },
+    "RestaurantSettings": {
+      "title": "RestaurantSettings",
+      "description": "Global restaurant settings",
+      "type": "object",
+      "properties": {
+        "restaurantName": { "type": "string", "maxLength": 100 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "themeColor": { "type": "string", "enum": ["amber", "emerald", "rose", "indigo", "neutral", "orange"] },
+        "businessHours": { "type": "string", "maxLength": 100 },
+        "whatsappNumber": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 100 },
+        "location": { "type": "string", "maxLength": 200 },
+        "googleMapUrl": { "type": "string", "maxLength": 1000 },
+        "socialLinks": { "type": "object" },
+        "bannerImage": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["restaurantName", "tagline", "logoUrl", "themeColor", "businessHours", "whatsappNumber", "email", "location"]
+    }
+  },
+  "firestore": {
+    "/menu/{itemId}": {
+      "schema": "MenuItem",
+      "description": "Collection of menu items"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection of orders"
+    },
+    "/reservations/{reservationId}": {
+      "schema": "Reservation",
+      "description": "Collection of table reservations"
+    },
+    "/offers/{offerCode}": {
+      "schema": "Offer",
+      "description": "Collection of promotional offers"
+    },
+    "/settings/{settingsId}": {
+      "schema": "RestaurantSettings",
+      "description": "Collection containing global restaurant settings"
+    }
+  }
+}

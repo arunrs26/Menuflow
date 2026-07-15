@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Primitive Definition & Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail(email) {
+      return request.auth.token.email == email && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && isVerifiedEmail("arunbunnychitti111@gmail.com");
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validations ---
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['id', 'name', 'price', 'description', 'category', 'image', 'isVeg', 'isAvailable'])
+        && data.keys().size() == 8
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.price is number && data.price >= 0
+        && data.description is string && data.description.size() <= 500
+        && data.category is string && data.category.size() <= 50
+        && data.image is string && data.image.size() <= 500
+        && data.isVeg is bool
+        && data.isAvailable is bool;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'customerName', 'customerPhone', 'items', 'totalAmount', 'status', 'timestamp', 'orderType'])
+        && (data.keys().size() == 8 || (data.keys().size() == 9 && data.keys().hasAll(['notes'])))
+        && data.id is string && data.id.size() <= 128
+        && data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 100
+        && data.customerPhone is string && data.customerPhone.size() <= 20
+        && data.items is list
+        && data.totalAmount is number && data.totalAmount >= 0
+        && data.status in ['pending', 'preparing', 'ready', 'delivered', 'cancelled']
+        && data.timestamp is string
+        && data.orderType in ['whatsapp', 'direct']
+        && (!data.keys().hasAll(['notes']) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidReservation(data) {
+      return data.keys().hasAll(['id', 'customerName', 'customerPhone', 'date', 'time', 'guests', 'status', 'createdAt'])
+        && (data.keys().size() == 8 || (data.keys().size() == 9 && data.keys().hasAll(['notes'])))
+        && data.id is string && data.id.size() <= 128
+        && data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 100
+        && data.customerPhone is string && data.customerPhone.size() <= 20
+        && data.date is string && data.date.size() <= 20
+        && data.time is string && data.time.size() <= 10
+        && data.guests is int && data.guests > 0 && data.guests <= 100
+        && data.status in ['pending', 'confirmed', 'cancelled']
+        && data.createdAt is string
+        && (!data.keys().hasAll(['notes']) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidOffer(data) {
+      return data.keys().hasAll(['code', 'discountPercent', 'description', 'isActive'])
+        && data.keys().size() == 4
+        && data.code is string && data.code.size() <= 30
+        && data.discountPercent is int && data.discountPercent >= 0 && data.discountPercent <= 100
+        && data.description is string && data.description.size() <= 200
+        && data.isActive is bool;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['restaurantName', 'tagline', 'logoUrl', 'themeColor', 'businessHours', 'whatsappNumber', 'email', 'location'])
+        && (data.keys().size() == 8 || (data.keys().size() == 9 && data.keys().hasAll(['bannerImage'])) || (data.keys().size() == 9 && data.keys().hasAll(['googleMapUrl'])) || (data.keys().size() == 9 && data.keys().hasAll(['socialLinks'])) || (data.keys().size() == 10 && data.keys().hasAll(['googleMapUrl', 'socialLinks'])) || (data.keys().size() == 11 && data.keys().hasAll(['googleMapUrl', 'socialLinks', 'bannerImage'])))
+        && data.restaurantName is string && data.restaurantName.size() <= 100
+        && data.tagline is string && data.tagline.size() <= 200
+        && data.logoUrl is string && data.logoUrl.size() <= 500
+        && data.themeColor in ['amber', 'emerald', 'rose', 'indigo', 'neutral', 'orange']
+        && data.businessHours is string && data.businessHours.size() <= 100
+        && data.whatsappNumber is string && data.whatsappNumber.size() <= 20
+        && data.email is string && data.email.size() <= 100
+        && data.location is string && data.location.size() <= 200;
+    }
+
+    // --- Rules for collections ---
+
+    // 1. Menu Collection
+    match /menu/{itemId} {
+      allow read: if true; // Public read
+      allow create: if isAdmin() && isValidId(itemId) && isValidMenuItem(incoming());
+      allow update: if isAdmin() && isValidMenuItem(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 2. Offers Collection
+    match /offers/{offerCode} {
+      allow read: if true; // Public read
+      allow create: if isAdmin() && isValidId(offerCode) && isValidOffer(incoming());
+      allow update: if isAdmin() && isValidOffer(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 3. Settings Collection
+    match /settings/{settingsId} {
+      allow read: if true; // Public read
+      allow create: if isAdmin() && isValidId(settingsId) && isValidSettings(incoming());
+      allow update: if isAdmin() && isValidSettings(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 4. Orders Collection
+    match /orders/{orderId} {
+      allow get: if true; // Public can get their specific order
+      allow list: if isAdmin(); // Only admin can list/query orders
+      allow create: if isValidId(orderId) && isValidOrder(incoming()) && incoming().status == 'pending'; // Guests can place orders (must be pending)
+      
+      // Split update permissions: only admin can modify status or items
+      allow update: if isAdmin() && isValidOrder(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 5. Reservations Collection
+    match /reservations/{reservationId} {
+      allow get: if true; // Public can get their reservation
+      allow list: if isAdmin(); // Only admin can list/query reservations
+      allow create: if isValidId(reservationId) && isValidReservation(incoming()) && incoming().status == 'pending'; // Guests can book tables (must be pending)
+      
+      // Split update permissions: only admin can modify status
+      allow update: if isAdmin() && isValidReservation(incoming());
+      allow delete: if isAdmin();
+    }
+  }
+}

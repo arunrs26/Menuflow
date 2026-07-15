@@ -416,6 +416,42 @@ async function startServer() {
     }
   });
 
+  // API Route: AI Email Draft Generator
+  app.post('/api/ai/draft-email-reply', async (req, res) => {
+    const { emailSubject, emailSnippet, emailFrom, replyTone = 'Warm & Thankful', customInstructions = '' } = req.body;
+    
+    const prompt = `You are the AI Restaurant Assistant.
+    We received an email from a customer:
+    From: ${emailFrom || 'Unknown Customer'}
+    Subject: ${emailSubject || 'No Subject'}
+    Content/Snippet: ${emailSnippet || ''}
+
+    Draft a professional, warm, and helpful email response.
+    Tone: ${replyTone}
+    ${customInstructions ? `Custom Instructions: ${customInstructions}` : ''}
+
+    Rules:
+    - Keep it concise, professional, and matching the requested tone.
+    - Start with a proper greeting and end with a professional sign-off representing the restaurant management.
+    - Do NOT include any subject lines, placeholder text, or markdown blocks (like \`\`\`html). Just output the plain text message body itself.`;
+
+    try {
+      if (ai) {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: prompt,
+        });
+        res.json({ replyText: response.text?.trim() });
+      } else {
+        const defaultReply = `Dear customer,\n\nThank you for reaching out to us! We have received your email regarding "${emailSubject || 'your inquiry'}" and would love to assist you. Our team is looking into this and will follow up with you shortly.\n\nWarm regards,\nRestaurant Management`;
+        res.json({ replyText: defaultReply, isFallback: true });
+      }
+    } catch (err: any) {
+      console.error('AI draft email reply error:', err);
+      res.status(500).json({ replyText: 'Dear customer,\n\nThank you for contacting us. We will get back to you shortly.\n\nBest regards,\nRestaurant Management' });
+    }
+  });
+
   // API Route: AI Translation
   app.post('/api/ai/translate', async (req, res) => {
     const { name, description, targetLang } = req.body;
@@ -517,6 +553,34 @@ async function startServer() {
     } catch (err: any) {
       console.error('AI SEO error:', err);
       res.status(500).json({ error: 'Failed to generate SEO keywords' });
+    }
+  });
+
+  // API Route: AI Email Draft Generator using @google/genai
+  app.post('/api/ai/draft-email', async (req, res) => {
+    const { recipientName, context, instructions } = req.body;
+    const db = loadDb();
+    const restaurantName = db.settings?.restaurantName || 'Our Restaurant';
+    
+    const prompt = `Write a highly professional and welcoming email on behalf of "${restaurantName}" to a customer named "${recipientName || 'Valued Customer'}".
+    Context: ${context}.
+    Special instructions: ${instructions || 'Be polite and helpful.'}.
+    
+    Return only the beautifully crafted HTML email body inside paragraph tags, with standard line breaks (<br/>) where appropriate. Do not include subject lines, markdown syntax formatting, nor standard placeholders like [Your Name], [Restaurant Name], or any placeholder fields. Sign off as the "The ${restaurantName} Team".`;
+
+    try {
+      if (ai) {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: prompt,
+        });
+        res.json({ draft: response.text?.trim() });
+      } else {
+        res.json({ draft: `<p>Dear ${recipientName || 'Valued Customer'},</p><p>Thank you for reaching out to ${restaurantName}. We have processed your request regarding <strong>${context}</strong> and look forward to welcoming you soon!</p><p>If you have any questions, feel free to reply to this email.</p><p>Warm regards,<br/>The ${restaurantName} Team</p>` });
+      }
+    } catch (err: any) {
+      console.error('AI email draft error:', err);
+      res.status(500).json({ error: 'Failed to generate email draft' });
     }
   });
 

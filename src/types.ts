@@ -27,6 +27,7 @@ export interface Order {
   timestamp: string;
   orderType: 'whatsapp' | 'direct';
   notes?: string;
+  tableNumber?: string;
 }
 
 export interface Reservation {
