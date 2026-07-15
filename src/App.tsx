@@ -18,7 +18,7 @@ const defaultSettings: RestaurantSettings = {
   businessHours: "Mon - Sun: 11:00 AM - 11:00 PM",
   whatsappNumber: "",
   email: "contact@myrestaurant.com",
-  location: "Enter Restaurant Address Here",
+  location: "H-No 1-57, Ginnedhari, Thiryani, DIST: Komaram Bheem Asifabad, Telangana 504297.",
   googleMapUrl: "",
   socialLinks: {
     instagram: "",
@@ -61,9 +61,17 @@ export default function App() {
     // 2. Real-time subscription to global restaurant settings
     const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'restaurant'), (snapshot) => {
       if (snapshot.exists()) {
-        setSettings(snapshot.data() as RestaurantSettings);
+        const data = snapshot.data() as RestaurantSettings;
+        setSettings(data);
         setLoading(false);
         setError('');
+
+        // Auto-migrate placeholder address to user's real address
+        if (data.location === "Enter Restaurant Address Here" || !data.location || data.location.trim() === "") {
+          updateDoc(doc(db, 'settings', 'restaurant'), {
+            location: "H-No 1-57, Ginnedhari, Thiryani, DIST: Komaram Bheem Asifabad, Telangana 504297."
+          }).catch((err) => console.error("Failed to auto-update location:", err));
+        }
       } else {
         console.log("No restaurant settings found in Firestore, using default local settings.");
         setSettings(defaultSettings);

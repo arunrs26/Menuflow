@@ -23,8 +23,11 @@ import {
   Sparkles,
   QrCode,
   Camera,
-  Upload
+  Upload,
+  History
 } from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { MenuItem, OrderItem, Reservation, Offer, RestaurantSettings } from '../types';
 
@@ -97,6 +100,62 @@ export default function CustomerSite({
   const [customerPhone, setCustomerPhone] = useState('');
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState<any | null>(null);
+
+  // Order History / Tracking States
+  const [orderHistoryOpen, setOrderHistoryOpen] = useState(false);
+  const [historyPhone, setHistoryPhone] = useState('');
+  const [ordersList, setOrdersList] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const [searched, setSearched] = useState(false);
+
+  // Pre-load customer info from local storage if available
+  useEffect(() => {
+    const cachedPhone = localStorage.getItem('customerPhone') || '';
+    const cachedName = localStorage.getItem('customerName') || '';
+    if (cachedPhone) {
+      setCustomerPhone(cachedPhone);
+      setHistoryPhone(cachedPhone);
+    }
+    if (cachedName) {
+      setCustomerName(cachedName);
+    }
+  }, []);
+
+  const fetchOrders = async (phoneToQuery?: string) => {
+    const targetPhone = phoneToQuery || historyPhone;
+    if (!targetPhone.trim()) {
+      setOrdersError('Please enter a phone number.');
+      return;
+    }
+
+    setLoadingOrders(true);
+    setOrdersError('');
+    setSearched(true);
+    try {
+      const q = query(
+        collection(db, 'orders'),
+        where('customerPhone', '==', targetPhone.trim())
+      );
+      const querySnapshot = await getDocs(q);
+      const retrieved: any[] = [];
+      querySnapshot.forEach((doc) => {
+        retrieved.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Sort newest first
+      retrieved.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      setOrdersList(retrieved);
+      // Cache the phone number
+      localStorage.setItem('customerPhone', targetPhone.trim());
+    } catch (err: any) {
+      console.error('Error fetching order history:', err);
+      setOrdersError('Failed to retrieve orders. Please check your network connection.');
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
 
   // Table Booking Form State
   const [bookingName, setBookingName] = useState('');
@@ -356,6 +415,11 @@ export default function CustomerSite({
     setIsPlacingOrder(false);
 
     if (res.success) {
+      // Cache contact info
+      localStorage.setItem('customerPhone', customerPhone);
+      localStorage.setItem('customerName', customerName);
+      setHistoryPhone(customerPhone);
+
       // Build WhatsApp Link
       let text = `*New Order from ${settings.restaurantName} Website!*\n\n`;
       text += `*Customer:* ${customerName}\n`;
@@ -408,6 +472,11 @@ export default function CustomerSite({
     setIsPlacingOrder(false);
 
     if (res.success) {
+      // Cache contact info
+      localStorage.setItem('customerPhone', customerPhone);
+      localStorage.setItem('customerName', customerName);
+      setHistoryPhone(customerPhone);
+
       setCart([]);
       setCartOpen(false);
       setOrderSuccess(res.order);
@@ -488,6 +557,19 @@ export default function CustomerSite({
             <a href="#hero" className="hover:text-neutral-950 transition-colors">Home</a>
             <a href="#menu" className="hover:text-neutral-950 transition-colors">Menu</a>
             <a href="#book" className="hover:text-neutral-950 transition-colors">Book Table</a>
+            <button
+              onClick={() => {
+                setOrderHistoryOpen(true);
+                const cachedPhone = localStorage.getItem('customerPhone') || '';
+                setHistoryPhone(cachedPhone);
+                if (cachedPhone) {
+                  fetchOrders(cachedPhone);
+                }
+              }}
+              className="hover:text-neutral-950 transition-colors cursor-pointer uppercase text-xs font-bold tracking-widest text-left"
+            >
+              Order History
+            </button>
             <a href="#reviews" className="hover:text-neutral-950 transition-colors">Reviews</a>
             <a href="#contact" className="hover:text-neutral-950 transition-colors">About</a>
           </nav>
@@ -521,10 +603,26 @@ export default function CustomerSite({
               </button>
             )}
 
+            <button
+              id="header-history-btn"
+              onClick={() => {
+                setOrderHistoryOpen(true);
+                const cachedPhone = localStorage.getItem('customerPhone') || '';
+                setHistoryPhone(cachedPhone);
+                if (cachedPhone) {
+                  fetchOrders(cachedPhone);
+                }
+              }}
+              className="p-2.5 rounded-none bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors cursor-pointer"
+              title="View Order History"
+            >
+              <History size={20} />
+            </button>
+
             <button 
               id="view-cart-btn"
               onClick={() => setCartOpen(true)}
-              className="relative p-2.5 rounded-none bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors"
+              className="relative p-2.5 rounded-none bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors cursor-pointer"
             >
               <ShoppingBag size={20} />
               {cart.length > 0 && (
@@ -1088,7 +1186,23 @@ export default function CustomerSite({
             </div>
             <span className="font-serif text-lg font-bold text-white">{settings.restaurantName}</span>
           </div>
-          <p className="text-xs text-neutral-500">© 2026 {settings.restaurantName} - MenuFlow AI Applet. All rights reserved.</p>
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <button
+              onClick={() => {
+                setOrderHistoryOpen(true);
+                const cachedPhone = localStorage.getItem('customerPhone') || '';
+                setHistoryPhone(cachedPhone);
+                if (cachedPhone) {
+                  fetchOrders(cachedPhone);
+                }
+              }}
+              className="text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-semibold underline underline-offset-4"
+            >
+              Track Past Orders
+            </button>
+            <span className="hidden sm:inline text-neutral-700">|</span>
+            <p className="text-xs text-neutral-500">© 2026 {settings.restaurantName} - MenuFlow AI Applet. All rights reserved.</p>
+          </div>
         </div>
       </footer>
 
@@ -1507,6 +1621,225 @@ export default function CustomerSite({
                   className="px-6 py-2 border border-neutral-200 hover:bg-neutral-100 font-semibold text-xs text-neutral-600 rounded-xl transition cursor-pointer"
                 >
                   Cancel Scanner
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Table QR Code Scanner Modal */}
+      <AnimatePresence>
+        {orderHistoryOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-md" onClick={() => setOrderHistoryOpen(false)} />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-neutral-100 relative z-10 flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="px-6 py-5 border-b border-neutral-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl ${theme.bgLight} ${theme.text}`}>
+                    <History className="animate-pulse" size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-serif font-bold text-neutral-950 text-base">Order History & Status</h4>
+                    <p className="text-[9px] text-neutral-400 font-bold uppercase tracking-wider">Patron Order Tracker</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setOrderHistoryOpen(false)}
+                  className="p-2 rounded-full hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="bg-neutral-50 p-6 flex-1 overflow-y-auto space-y-6">
+                {/* Search Input Container */}
+                <div className="bg-white rounded-2xl border border-neutral-200/60 p-5 shadow-xs space-y-4">
+                  <label className="block text-[10px] font-bold text-neutral-700 uppercase tracking-wider">
+                    Enter your Phone Number
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-neutral-400 pointer-events-none">
+                        <Phone size={16} />
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="e.g. +91 98765 43210"
+                        value={historyPhone}
+                        onChange={(e) => setHistoryPhone(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            fetchOrders();
+                          }
+                        }}
+                        className="w-full pl-10 pr-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:border-neutral-400 focus:bg-white transition"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={loadingOrders}
+                      onClick={() => fetchOrders()}
+                      className={`px-5 py-2.5 rounded-xl font-bold text-xs text-white transition uppercase tracking-wider cursor-pointer flex items-center gap-1.5 ${theme.bg} hover:opacity-90 disabled:opacity-50`}
+                    >
+                      <Search size={14} />
+                      <span>{loadingOrders ? 'Searching...' : 'Search'}</span>
+                    </button>
+                  </div>
+                  <p className="text-neutral-400 text-[10px] leading-relaxed">
+                    We will scan all records to retrieve past and live orders associated with this number.
+                  </p>
+                </div>
+
+                {/* Loading State */}
+                {loadingOrders && (
+                  <div className="py-12 flex flex-col items-center justify-center text-center">
+                    <div className="w-10 h-10 border-4 border-neutral-200 border-t-amber-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-sm font-semibold text-neutral-700">Searching orders...</p>
+                    <p className="text-xs text-neutral-400 mt-1">Checking secure database logs</p>
+                  </div>
+                )}
+
+                {/* Error Callout */}
+                {ordersError && (
+                  <div className="p-4 bg-red-50 border border-red-100 text-red-700 rounded-2xl flex items-start gap-3 text-xs leading-relaxed">
+                    <AlertCircle className="shrink-0 mt-0.5" size={16} />
+                    <div>
+                      <p className="font-bold">Retrieval Error</p>
+                      <p className="mt-0.5">{ordersError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Results List */}
+                {!loadingOrders && !ordersError && searched && (
+                  <div className="space-y-4">
+                    <h5 className="font-bold text-xs text-neutral-500 uppercase tracking-wider px-1">
+                      Found {ordersList.length} {ordersList.length === 1 ? 'Order' : 'Orders'}
+                    </h5>
+
+                    {ordersList.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-neutral-200/60 p-8 text-center space-y-3">
+                        <div className="w-12 h-12 bg-neutral-100 text-neutral-400 rounded-full flex items-center justify-center mx-auto">
+                          <History size={24} />
+                        </div>
+                        <div>
+                          <h6 className="font-bold text-neutral-800 text-sm">No Orders Found</h6>
+                          <p className="text-neutral-500 text-xs mt-1 max-w-xs mx-auto leading-relaxed">
+                            We couldn't locate any orders matching <strong className="text-neutral-900 font-mono">"{historyPhone}"</strong>. Double-check your number or place a new order.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {ordersList.map((order) => {
+                          const isPending = order.status === 'pending';
+                          const isPreparing = order.status === 'preparing';
+                          const isReady = order.status === 'ready';
+                          const isDelivered = order.status === 'delivered';
+                          const isCancelled = order.status === 'cancelled';
+
+                          let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
+                          let dotColor = "bg-neutral-400";
+                          if (isPending) {
+                            badgeColor = "bg-amber-50 text-amber-800 border-amber-200";
+                            dotColor = "bg-amber-600";
+                          } else if (isPreparing) {
+                            badgeColor = "bg-blue-50 text-blue-800 border-blue-200";
+                            dotColor = "bg-blue-600";
+                          } else if (isReady) {
+                            badgeColor = "bg-indigo-50 text-indigo-800 border-indigo-200";
+                            dotColor = "bg-indigo-600";
+                          } else if (isDelivered) {
+                            badgeColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                            dotColor = "bg-emerald-600";
+                          } else if (isCancelled) {
+                            badgeColor = "bg-red-50 text-red-800 border-red-200";
+                            dotColor = "bg-red-600";
+                          }
+
+                          return (
+                            <div key={order.id} className="bg-white rounded-2xl border border-neutral-200/60 p-5 shadow-xs hover:border-neutral-300 transition space-y-4">
+                              {/* Card Header */}
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-neutral-900 text-sm">#{order.id}</span>
+                                    {order.tableNumber && (
+                                      <span className="px-2 py-0.5 bg-neutral-100 border border-neutral-200 text-neutral-700 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                                        Table {order.tableNumber}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-neutral-400 mt-1">
+                                    {new Date(order.timestamp).toLocaleString(undefined, {
+                                      dateStyle: 'medium',
+                                      timeStyle: 'short'
+                                    })}
+                                  </p>
+                                </div>
+
+                                <div className={`px-2.5 py-1 border rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${badgeColor}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${dotColor} ${isPending || isPreparing ? 'animate-pulse' : ''}`}></span>
+                                  <span>{order.status}</span>
+                                </div>
+                              </div>
+
+                              {/* Card Items List */}
+                              <div className="border-t border-b border-neutral-100 py-3 space-y-1.5">
+                                {order.items?.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between text-xs">
+                                    <span className="text-neutral-600 font-medium font-sans">
+                                      {item.name} <span className="text-neutral-400 font-normal font-sans">x{item.quantity}</span>
+                                    </span>
+                                    <span className="font-mono text-neutral-900 font-semibold">${(item.price * item.quantity).toFixed(2)}</span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Card Footer */}
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-neutral-400 uppercase font-bold text-[9px] tracking-wider">
+                                  {order.orderType === 'whatsapp' ? 'WhatsApp Order' : 'Direct Order'}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-neutral-500">Total:</span>
+                                  <span className="font-mono font-bold text-neutral-900 text-sm">${Number(order.totalAmount || 0).toFixed(2)}</span>
+                                </div>
+                              </div>
+
+                              {order.notes && (
+                                <div className="bg-neutral-50 rounded-xl p-3 border border-neutral-100 text-[11px] text-neutral-500 leading-relaxed italic">
+                                  <strong>Notes:</strong> {order.notes}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-neutral-100 bg-neutral-50 text-center">
+                <button
+                  type="button"
+                  onClick={() => setOrderHistoryOpen(false)}
+                  className="px-6 py-2 border border-neutral-200 hover:bg-neutral-100 font-semibold text-xs text-neutral-600 rounded-xl transition cursor-pointer"
+                >
+                  Close Tracker
                 </button>
               </div>
             </motion.div>

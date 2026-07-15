@@ -126,7 +126,7 @@ service cloud.firestore {
     // 4. Orders Collection
     match /orders/{orderId} {
       allow get: if true; // Public can get their specific order
-      allow list: if isAdmin(); // Only admin can list/query orders
+      allow list: if isAdmin() || (resource.data.customerPhone != null); // Public can query orders by customerPhone
       allow create: if isValidId(orderId) && isValidOrder(incoming()) && incoming().status == 'pending'; // Guests can place orders (must be pending)
       
       // Split update permissions: only admin can modify status or items
