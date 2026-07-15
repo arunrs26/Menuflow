@@ -1,0 +1,8 @@
+{
+  "name": "MenuFlow AI",
+  "description": "A comprehensive restaurant management terminal and customizable customer ordering website with live order tracking, WhatsApp integrations, table bookings, and AI tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

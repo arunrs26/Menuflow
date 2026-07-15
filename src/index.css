@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-serif: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom scrollbar styling to make the app look like a premium terminal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 99px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+/* Custom styles for animations */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Base custom interactive states with bold, flat aesthetic */
+a, button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Theme color helper variables mapped to the bold typography theme colors */
+.theme-amber {
+  --theme-color-primary: #f97316; /* Bold high-contrast Orange */
+  --theme-color-hover: #ea580c;
+  --theme-color-light: #fff7ed;
+  --theme-color-text: #f97316;
+}
+.theme-emerald {
+  --theme-color-primary: #10b981;
+  --theme-color-hover: #059669;
+  --theme-color-light: #f0fdf4;
+  --theme-color-text: #10b981;
+}
+.theme-rose {
+  --theme-color-primary: #f43f5e;
+  --theme-color-hover: #e11d48;
+  --theme-color-light: #fff1f2;
+  --theme-color-text: #f43f5e;
+}
+.theme-indigo {
+  --theme-color-primary: #6366f1;
+  --theme-color-hover: #4f46e5;
+  --theme-color-light: #f5f3ff;
+  --theme-color-text: #6366f1;
+}
+.theme-neutral {
+  --theme-color-primary: #111827;
+  --theme-color-hover: #1f2937;
+  --theme-color-light: #f9fafb;
+  --theme-color-text: #111827;
+}
+.theme-orange {
+  --theme-color-primary: #f97316; /* Design HTML orange-500 */
+  --theme-color-hover: #ea580c;   /* Design HTML orange-600 */
+  --theme-color-light: #fff7ed;
+  --theme-color-text: #f97316;
+}
+
+/* Bold typography helper classes */
+.bold-header {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.04em;
+}
+
+.bold-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+}
+
+.bold-button {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  border-radius: 0px !important; /* Sharp, flat rectangular aesthetic from Design HTML */
+}
+
